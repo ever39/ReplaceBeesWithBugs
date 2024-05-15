@@ -14,7 +14,7 @@ namespace ReplaceBeesWithBugs
         {
             mls = Logger;
             new Harmony("ReplaceBeesWithHoardingBugs").PatchAll(typeof(StartOfRoundPatches));
-            mls.LogInfo("Patch applied, bees will be replaced with hoarding bugs");
+            mls.LogInfo("patch applied, bees will be replaced with hoarding bugs");
         }
     }
 
