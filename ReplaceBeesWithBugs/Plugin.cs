@@ -6,7 +6,7 @@ using UnityEngine;
 
 namespace ReplaceBeesWithBugs
 {
-    [BepInPlugin("ReplaceBeesWithHoardingBugs", "Replace bees with hoarding bugs", "1.0.0")]
+    [BepInPlugin("ReplaceBeesWithHoardingBugs", "Replace bees with hoarding bugs", "1.0.2")]
     public class Plugin : BaseUnityPlugin
     {
         internal static ManualLogSource mls;
@@ -21,7 +21,7 @@ namespace ReplaceBeesWithBugs
             killBeesOnRoundStart = Config.Bind("General", "Kill bees on round start?", true, "Also spawns initial hoarding bugs!");
             spawnBugsOvertime = Config.Bind("General", "Spawn bugs over time", true, "Spawns bugs overtime based on a random interval between 30 and 120 seconds");
             minBugAmount = Config.Bind("General", "Minimum bug amount per spawn cycle", 1);
-            maxBugAmount = Config.Bind("General", "Maximum bug amount per spawn cycle", 5);
+            maxBugAmount = Config.Bind("General", "Maximum bug amount per spawn cycle", 3);
 
             new Harmony("ReplaceBeesWithHoardingBugs").PatchAll(typeof(StartOfRoundPatches));
             mls.LogInfo("patch applied, bees will be replaced with hoarding bugs");
@@ -32,7 +32,6 @@ namespace ReplaceBeesWithBugs
     {
         static bool isHost = false;
         static EnemyType hoardingBugEnemyType;
-        static int beeHiveAmount = 0;
         static float bugSpawnCooldown;
         static int maxBugs;
         static int minBugs;
@@ -43,6 +42,7 @@ namespace ReplaceBeesWithBugs
             isHost = GameNetworkManager.Instance.isHostingGame;
             maxBugs = Plugin.maxBugAmount.Value;
             minBugs = Plugin.minBugAmount.Value;
+            bugSpawnCooldown = Random.Range(30, 120);
 
             if (!isHost)
             {
@@ -54,7 +54,6 @@ namespace ReplaceBeesWithBugs
                 if (enemy.enemyType.enemyPrefab.GetComponent<HoarderBugAI>() != null)
                 {
                     hoardingBugEnemyType = enemy.enemyType;
-                    beeHiveAmount = 0;
                     Plugin.mls.LogInfo("got hoarding bug enemy type");
                 }
             }
@@ -62,15 +61,13 @@ namespace ReplaceBeesWithBugs
 
         [HarmonyPatch(typeof(RedLocustBees), nameof(RedLocustBees.SpawnHiveClientRpc))]
         [HarmonyPostfix]
-        static void ReplaceBeesWithHoardingBugs()
+        static void ReplaceBeesWithHoardingBugs(ref RedLocustBees __instance)
         {
             if (!isHost)
             {
                 Plugin.mls.LogWarning("NOT HOST, returning");
                 return;
             }
-
-            bugSpawnCooldown = UnityEngine.Random.Range(20, 120);
 
             if (!Plugin.killBeesOnRoundStart.Value)
             {
@@ -80,21 +77,18 @@ namespace ReplaceBeesWithBugs
 
             try
             {
-                RedLocustBees[] bees = Object.FindObjectsOfType<RedLocustBees>();
-                if (bees != null)
-                {
-                    foreach (RedLocustBees bee in bees)
-                    {
-                        Vector3 beePos = bee.transform.position;
-                        ((EnemyAI)bee).enemyType.canDie = true;
-                        ((EnemyAI)bee).KillEnemyClientRpc(true);
-                        ((EnemyAI)bee).KillEnemyOnOwnerClient(true);
+                RedLocustBees bee = __instance;
+                Vector3 beePos = bee.transform.position;
+                int randomBugAmount = Random.Range(minBugs, maxBugs);
 
-                        RoundManager.Instance.SpawnEnemyGameObject(beePos, 0, UnityEngine.Random.Range(minBugs, maxBugs), hoardingBugEnemyType);
-                        beeHiveAmount++;
-                        Plugin.mls.LogInfo($"Spawned initial hoarding bug to replace dead bees at position {beePos} ({beeHiveAmount})");
-                    }
-                }
+                bee.enemyType.canDie = true;
+                bee.KillEnemyClientRpc(true);
+                bee.KillEnemyOnOwnerClient(true);
+
+                for (var i = 1; i <= randomBugAmount; i++)
+                    RoundManager.Instance.SpawnEnemyGameObject(beePos, 0, 1, hoardingBugEnemyType);
+
+                Plugin.mls.LogInfo($"Spawned initial hoarding bug(s) to replace dead bees at position {beePos})");
             }
             catch
             {
@@ -110,14 +104,16 @@ namespace ReplaceBeesWithBugs
             {
                 bugSpawnCooldown -= Time.deltaTime;
 
-                if (bugSpawnCooldown < 0 && Plugin.spawnBugsOvertime.Value)
+                if (bugSpawnCooldown < 0 && Plugin.spawnBugsOvertime.Value && !StartOfRound.Instance.inShipPhase)
                 {
+                    Plugin.mls.LogInfo("attempting to spawn bugs randomly!");
                     GameObject[] hives = GameObject.FindGameObjectsWithTag("PhysicsProp");
+                    int randomBugAmount = Random.Range(minBugs, maxBugs);
 
                     if (hives.Length == 0 | hives == null)
                     {
                         Plugin.mls.LogInfo("NO HIVES, returning");
-                        bugSpawnCooldown = UnityEngine.Random.Range(20, 120);
+                        bugSpawnCooldown = Random.Range(30, 120);
                         return;
                     }
 
@@ -126,11 +122,13 @@ namespace ReplaceBeesWithBugs
                         if (hive.name == "RedLocustHive(Clone)" && !hive.GetComponent<PhysicsProp>().isInShipRoom)
                         {
                             Vector3 hivePos = hive.transform.position;
-                            RoundManager.Instance.SpawnEnemyGameObject(hivePos, 0, UnityEngine.Random.Range(minBugs, maxBugs), hoardingBugEnemyType);
+                            for(var i = 1; i<=randomBugAmount; i++)
+                                RoundManager.Instance.SpawnEnemyGameObject(hivePos, 0, 1, hoardingBugEnemyType);
                         }
                     }
 
-                    bugSpawnCooldown = UnityEngine.Random.Range(20, 120);
+                    Plugin.mls.LogInfo("spawned bugs at respective hives, resetting cooldown");
+                    bugSpawnCooldown = Random.Range(30, 120);
                 }
             }
         }
